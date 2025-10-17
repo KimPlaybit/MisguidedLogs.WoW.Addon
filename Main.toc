@@ -1,0 +1,11 @@
+## Interface: 110005
+## Version: 0.0.1
+## Title: MisguidedLogs
+## Notes: This addon is to track and log runs for getting achievements on the page Misguidedlogs.com
+## Author: Zeeshan
+
+Main.lua
+Export.lua
+Achievement.lua
+AchievementPopup.lua
+Inspect.lua
