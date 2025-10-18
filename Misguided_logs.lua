@@ -12,6 +12,7 @@ local HYBRID_HIGH = 0.55
 
 -- DB init
 local function InitDB()
+    GroupRecorderDB = {}
     if not GroupRecorderDB then GroupRecorderDB = {} end
     if not GroupRecorderDB.groups then GroupRecorderDB.groups = {} end
     if not GroupRecorderDB.pulls then GroupRecorderDB.pulls = {} end

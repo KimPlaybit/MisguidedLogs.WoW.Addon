@@ -2,12 +2,12 @@
 -- Simple popup for achievement notification
 
 local POPUP_FADE_IN = 0.2
-local POPUP_SHOW = 3.0
-local POPUP_FADE_OUT = 0.5
+local POPUP_SHOW = 10.0
+local POPUP_FADE_OUT = 5
 
 local popup = CreateFrame("Frame", "GroupRecorderAchPopup", UIParent)
-popup:SetSize(220, 60)
-popup:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+popup:SetSize(400, 60)
+popup:SetPoint("CENTER", UIParent, "CENTER", 0, -200)
 popup:Hide()
 
 -- Background
@@ -72,7 +72,7 @@ end
 -- Public API: call when an achievement is fulfilled
 -- ach: table with fields id (optional), name (string), class (string), icon (optional texture path)
 GroupRecorder = GroupRecorder or {}
-function GroupRecorder.NotifyAchievement(ach)
+function NotifyAchievement(ach)
     if not ach or not ach.name then return end
     local title = ach.name
     local sub = ach.class and ("Class: "..tostring(ach.class)) or ""

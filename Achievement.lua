@@ -107,6 +107,13 @@ function EndPull()
                 class = cls,
                 timestamp = time(),
             }
+            
+            NotifyAchievement({
+                id = achInfo.id,
+                name = achInfo.name or ("Single-class clear: "..tostring(cls)),
+                class = cls
+            })
+
             print(("GroupRecorder: achievement '%s' fulfilled on boss %s by class %s"):format(achInfo.name or achInfo.id or bossKey, bossKey, cls))
         end
     end
