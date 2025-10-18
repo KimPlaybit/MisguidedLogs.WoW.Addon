@@ -79,7 +79,3 @@ function GroupRecorder.NotifyAchievement(ach)
     local icon = ach.icon or ach.iconPath or nil
     ShowAchievementPopup(title, sub, icon)
 end
-
-local ACHIEVEMENTS_BY_BOSS = {
-    ["Onyxia"] = { id = 90001, name = "Onyxia: Single-Class Clear", icon = "Interface\\Icons\\INV_Misc_Head_Dragon_01" },
-}

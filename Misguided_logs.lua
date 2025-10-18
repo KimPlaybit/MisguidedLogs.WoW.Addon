@@ -40,6 +40,7 @@ local function RecordGroup(timestamp)
             end
         end
     else
+        print("testing Group")
         -- player
         local pname = UnitName("player")
         local pguid = UnitGUID("player")
@@ -54,31 +55,70 @@ local function RecordGroup(timestamp)
         end
     end
     GroupRecorderDB.groups[tostring(timestamp)] = members
+    
+    print(members)
     return members
 end
 
 -- Pull tracking state
-local currentPull = nil
-
+currentPull = nil
 local function StartPull(bossName)
     local ts = time()
     currentPull = {
         start = ts,
         boss = bossName or "unknown",
-        -- per-player aggregated stats: key by name; store GUID if available
-        players = {}, -- players[name] = {guid = GUID, damage = 0, healing = 0, damageTaken = 0}
-        -- legacy maps for compatibility
+        players = {}, -- players[name] = {guid=..., fullName=..., realm=..., class=..., damage=0, healing=0, damageTaken=0}
         damageDone = {},
         healingDone = {},
         damageTaken = {},
     }
-    GroupRecorderDB.pulls[tostring(ts)] = currentPull
-end
 
-local function EndPull()
-    if not currentPull then return end
-    currentPull["end"] = time()
-    currentPull = nil
+    -- include all group members and the player
+    local function AddUnit(unit)
+        if not UnitExists(unit) or not UnitIsPlayer(unit) then return end
+        local name = UnitName(unit)
+        if not name then return end
+        local fullName = name
+        local realm = nil
+        local short = name:match("^(.-)%-.+$")
+        if short then fullName = name; realm = name:match("%-(.+)$") end
+        local guid = UnitGUID(unit)
+        local class, classFile = UnitClass(unit)
+        -- avoid duplicate entries by full name (realm-qualified) or short name
+        if not currentPull.players[fullName] then
+            currentPull.players[fullName] = {
+                guid = guid,
+                name = fullName,
+                realm = realm,
+                class = classFile,
+                damage = 0,
+                healing = 0,
+                damageTaken = 0,
+            }
+        end
+    end
+
+    -- party/raid members
+    if IsInRaid() then
+        for i=1, GetNumGroupMembers() do
+            AddUnit("raid"..i)
+        end
+    elseif GetNumGroupMembers() > 0 then
+        -- party includes player as "player" and party1..party4
+        AddUnit("player")
+        for i=1, GetNumGroupMembers()-1 do
+            AddUnit("party"..i)
+        end
+    else
+        -- solo: add player only
+        AddUnit("player")
+    end
+
+    -- ensure player present if not already
+    AddUnit("player")
+
+    print(currentPull.boss)
+    GroupRecorderDB.pulls[tostring(ts)] = currentPull
 end
 
 local function EnsurePlayerEntry(name, guid)
@@ -97,6 +137,7 @@ end
 -- Combat log parsing
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
+        print("Loading DB and group")
         InitDB()
         RecordGroup()
     elseif event == "GROUP_ROSTER_UPDATE" then
@@ -105,6 +146,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local encounterID, encounterName = ...
         StartPull(encounterName)
     elseif event == "ENCOUNTER_END" then
+        print("EncounterEnded")
         EndPull()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, hideCaster,
@@ -118,6 +160,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
             amount = arg11
         elseif subevent:match("SPELL_DAMAGE") or subevent:match("RANGE_DAMAGE") then
             amount = arg15 or arg11
+            if amount == 0 or amount == -1 then
+                amount = arg14
+            end
         elseif subevent:match("SPELL_HEAL") or subevent:match("HEAL") then
             amount = arg15 or arg11
         end
@@ -140,12 +185,17 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     local p = EnsurePlayerEntry(srcName, srcGUID)
                     if p then p.damage = p.damage + dmg end
                     currentPull.damageDone[srcName] = (currentPull.damageDone[srcName] or 0) + dmg
+                    print("Damage Done" .. tostring(currentPull.damageDone[srcName]).. ", " .. p.guid)
+                    print("Current Damage Done by attack: " .. dmg.. ", " .. p.guid)
+                    EndPull()
                 end
                 -- track damageTaken for targets (who the boss is hitting)
                 if dstName and dstGUID and dstGUID:sub(1,6) == "Player" then
                     local p = EnsurePlayerEntry(dstName, dstGUID)
                     if p then p.damageTaken = p.damageTaken + dmg end
                     currentPull.damageTaken[dstName] = (currentPull.damageTaken[dstName] or 0) + dmg
+                    print("Damage Taken" .. tostring(currentPull.damageTaken[dstName]) .. ", " .. p.guid)
+                    print("sourceGuid" .. srcGUID)
                 end
             end
 
@@ -156,6 +206,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     local p = EnsurePlayerEntry(srcName, srcGUID)
                     if p then p.healing = p.healing + heal end
                     currentPull.healingDone[srcName] = (currentPull.healingDone[srcName] or 0) + heal
+                    print("Heal Done" .. tostring(currentPull.healingDone[srcName]) .. ", " .. p.guid)
                 end
             end
         end

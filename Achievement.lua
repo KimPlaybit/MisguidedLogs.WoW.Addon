@@ -3,6 +3,7 @@
 local ACHIEVEMENTS_BY_BOSS = {
     ["Onyxia"] = { id = 90001, name = "Onyxia: Single-Class Clear" },
     ["Lucifron"] = { id = 90002, name = "Lucifron: Single-Class Clear" },
+    ["Targorr the Dread"] = { id = 1696, name = "Targorr the Dread: Single-Class Clear" },
 }
 
 -- Helper: get class from a player name entry in pull.players if available via GUID lookup
@@ -10,6 +11,7 @@ local function GetClassFromPlayerEntry(p)
     if not p then return nil end
     -- try to use stored guid to derive class token (GUID contains unit type and hex id; not class)
     -- fallback: try UnitClass for online members (may fail for logged out players)
+    print(p.guid)
     if p.guid then
         -- No reliable class from GUID in Classic; attempt UnitName -> class via unit token search
         -- Try searching raid/party/player units for matching GUID
@@ -54,7 +56,6 @@ local function CheckSingleClassAchievement(pull)
     if not pull or not pull.players then return nil end
     local classesSeen = {}
     local contribCount = 0
-
     for name, p in pairs(pull.players) do
         -- consider player only if they contributed damage or healing ( >0 )
         local contrib = (p.damage or 0) + (p.healing or 0)

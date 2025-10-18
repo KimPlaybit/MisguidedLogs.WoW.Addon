@@ -1,57 +1,87 @@
 -- InspectAchievements.lua
 -- Shows recorded achievements for inspected unit/player
 
-local InspectFrame = CreateFrame("Frame", "GroupRecorderInspectFrame", UIParent, "BasicFrameTemplateWithInset")
-InspectFrame:SetSize(360, 200)
-InspectFrame:SetPoint("CENTER", UIParent, "CENTER", 0, -100)
-InspectFrame:Hide()
+local Inspect = CreateFrame("Frame", "Inspect", nil, "BackdropTemplate")
+local loaded_inspect_frame = false;
 
-InspectFrame.title = InspectFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-InspectFrame.title:SetPoint("TOPLEFT", InspectFrame.TitleBg or InspectFrame, "TOPLEFT", 8, -8)
-InspectFrame.title:SetText("Recorded Achievements")
+local LINE_HEIGHT = 18
+local TAB_TITLE = "MisguidedLogs Achievements"
 
-local scroll = CreateFrame("ScrollFrame", nil, InspectFrame, "UIPanelScrollFrameTemplate")
-scroll:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 10, -32)
-scroll:SetPoint("BOTTOMRIGHT", InspectFrame, "BOTTOMRIGHT", -30, 10)
+-- Create persistent frames (parent will be set to InspectFrame when shown)
+local IPanel = CreateFrame("Frame", nil, UIParent)
+IPanel:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -50, -200)
+IPanel:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -200, 0)
+IPanel:Hide()
 
-local content = CreateFrame("Frame", nil, scroll)
-content:SetSize(1,1)
-scroll:SetScrollChild(content)
+local I_f = CreateFrame("Frame", "GroupRecorderInspectPanel", IPanel)
+I_f:SetSize(400, 400)
+I_f:SetPoint("CENTER")
+I_f:Hide()
+
+-- Decorative textures (reuse PaperDoll art like example)
+local I_t = I_f:CreateTexture(nil, "ARTWORK")
+I_t:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-General-TopLeft")
+I_t:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 2, -1)
+I_t:SetWidth(256); I_t:SetHeight(256)
+
+local I_tr = I_f:CreateTexture(nil, "ARTWORK")
+I_tr:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-General-TopRight")
+I_tr:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 258, -1)
+I_tr:SetWidth(128); I_tr:SetHeight(256)
+
+local I_bl = I_f:CreateTexture(nil, "ARTWORK")
+I_bl:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-General-BottomLeft")
+I_bl:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 2, -257)
+I_bl:SetWidth(256); I_bl:SetHeight(256)
+
+local I_br = I_f:CreateTexture(nil, "ARTWORK")
+I_br:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-General-BottomRight")
+I_br:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 258, -257)
+I_br:SetWidth(128); I_br:SetHeight(256)
+
+local title_text = I_f:CreateFontString(nil, "ARTWORK")
+title_text:SetFontObject(GameFontNormalSmall)
+title_text:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 100, -50)
+title_text:SetTextColor(1, 0.82, 0)
+title_text:SetText(TAB_TITLE)
+
+-- Scroll area for achievements
+local content = CreateFrame("Frame", "GroupRecorderInspectContent", IPanel)
+content:SetSize(293, 348)
+content:SetPoint("TOPLEFT", IPanel, "TOPLEFT", 8, -60)
+
+local scroll = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
+scroll:SetAllPoints(content)
+local scrollChild = CreateFrame("Frame", nil, scroll)
+scrollChild:SetSize(1,1)
+scroll:SetScrollChild(scrollChild)
 
 local lines = {}
-local LINE_HEIGHT = 18
 local function EnsureLines(n)
     for i = #lines + 1, n do
-        local l = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        l:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i-1)*LINE_HEIGHT)
+        local l = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        l:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(i-1)*LINE_HEIGHT)
         l:SetJustifyH("LEFT")
         lines[i] = l
     end
 end
+local function ClearContent() for i=1,#lines do lines[i]:SetText("") end end
 
-local function ClearContent()
-    for i=1,#lines do lines[i]:SetText("") end
-end
-
--- Helper: gather achievements for a player by guid or name
-local function GetAchievementsForPlayer(identifier) -- identifier can be guid or plain name
+-- Data lookup (your original logic)
+local function GetAchievementsForPlayer(identifier)
     local results = {}
     if not GroupRecorderDB or not GroupRecorderDB.pulls then return results end
     for ts, pull in pairs(GroupRecorderDB.pulls) do
-        if pull and pull.achievements then
+        if pull and pull.achievements and pull.players then
             for key, ach in pairs(pull.achievements) do
-                -- ach entry stored earlier contains class, timestamp, maybe id/name
-                -- we try to attribute by matching participating players in pull (guid or name)
-                if pull.players then
-                    for pname, p in pairs(pull.players) do
-                        if (p.guid and identifier == p.guid) or (identifier == pname) or (identifier == (pname:match("^(.-)%-.+$") or pname)) then
-                            results[#results+1] = {
-                                timestamp = ach.timestamp or tonumber(ts) or tonumber(pull.start) or 0,
-                                boss = pull.boss,
-                                achievement = ach,
-                            }
-                            break
-                        end
+                for pname, p in pairs(pull.players) do
+                    if (p.guid and identifier == p.guid) or (identifier == pname) or (identifier == (pname:match("^(.-)%-.+$") or pname)) then
+                        results[#results+1] = {
+                            timestamp = ach.timestamp or tonumber(ts) or tonumber(pull.start) or 0,
+                            boss = pull.boss,
+                            achievement = ach,
+                        }
+                        break
                     end
                 end
             end
@@ -61,98 +91,160 @@ local function GetAchievementsForPlayer(identifier) -- identifier can be guid or
     return results
 end
 
--- Inspect event handler: when tooltip/inspect occurs, show frame with achievements
-local function ShowInspectAchievements(unit)
-    if not unit then return end
-    if not UnitIsPlayer(unit) then return end
-
-    local guid = UnitGUID(unit)
-    local name = UnitName(unit)
-    local plainName = name and name:match("^(.-)%-.+$") or name
-
-    local achsByGUID = guid and GetAchievementsForPlayer(guid) or {}
-    local achsByName = GetAchievementsForPlayer(name) or {}
-    local achsByPlain = plainName and GetAchievementsForPlayer(plainName) or {}
-
-    -- Merge results, avoid duplicates by timestamp+boss+id
-    local seen = {}
-    local merged = {}
-    local function addList(list)
-        for _,v in ipairs(list) do
-            local id = (v.achievement.id and tostring(v.achievement.id) or tostring(v.achievement.name or "")) .. "|" .. tostring(v.boss) .. "|" .. tostring(v.timestamp)
-            if not seen[id] then
-                seen[id] = true
-                merged[#merged+1] = v
-            end
-        end
-    end
-    addList(achsByGUID); addList(achsByName); addList(achsByPlain)
-
-    -- Display
-    if #merged == 0 then
-        EnsureLines(1)
-        ClearContent()
-        lines[1]:SetText("No recorded achievements for " .. (name or "player"))
-        InspectFrame:SetHeight(80)
-        InspectFrame:Show()
+local function PopulateForList(list, displayName)
+    if #list == 0 then
+        EnsureLines(1); ClearContent()
+        lines[1]:SetText("No recorded achievements for " .. (displayName or "player"))
         return
     end
-
-    EnsureLines(#merged)
-    ClearContent()
-    for i,v in ipairs(merged) do
+    EnsureLines(#list); ClearContent()
+    for i,v in ipairs(list) do
         local timeStr = date("%Y-%m-%d %H:%M:%S", v.timestamp or 0)
         local achName = v.achievement.name or ("Achievement "..tostring(v.achievement.id or ""))
         lines[i]:SetText(("%s — %s — %s"):format(timeStr, achName, tostring(v.boss)))
     end
-    local height = math.min(200, 28 + #merged * LINE_HEIGHT)
-    InspectFrame:SetHeight(height)
-    InspectFrame:Show()
 end
 
--- Hook into Inspect Unit or Player Target: provide slash and right-click menu option
-SLASH_GROUPREC_INSPECT1 = "/grinspect"
-SlashCmdList["GROUPREC_INSPECT"] = function(msg)
-    local name = (msg and msg:match("%S+")) or UnitName("target")
-    if not name then print("Usage: /grinspect [name] or target a player") return end
-    -- Attempt to find unit by name in group to get GUID; otherwise just search by name in DB
-    local unitFound = nil
-    for i=1, GetNumGroupMembers() do
-        local unit = IsInRaid() and ("raid"..i) or ("party"..i)
-        if UnitExists(unit) and UnitName(unit) == name then unitFound = unit; break end
+-- Show/hide functions modeled after example
+function ShowInspectGR(_dummy, other_name)
+    if not InspectFrame then return end
+    IPanel:SetParent(InspectFrame)
+    IPanel:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", -50, -200)
+    IPanel:SetPoint("BOTTOMRIGHT", InspectFrame, "BOTTOMRIGHT", -200, 0)
+
+    -- reposition textures/title/content relative to InspectFrame
+    I_t:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 2, -1)
+    I_tr:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 258, -1)
+    I_bl:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 2, -257)
+    I_br:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 258, -257)
+    title_text:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 125, -40)
+    content:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 25, -80)
+
+    -- determine inspected unit: prefer InspectFrame.unit if provided by client, else target
+    local inspectedUnit = InspectFrame.unit
+    if not inspectedUnit or not UnitExists(inspectedUnit) then
+        if UnitExists("target") and UnitIsPlayer("target") then inspectedUnit = "target" end
     end
-    if not unitFound and UnitName("target") == name and UnitIsPlayer("target") then unitFound = "target" end
-    if unitFound then
-        ShowInspectAchievements(unitFound)
-    else
-        -- fallback: lookup by name string only
-        local achs = GetAchievementsForPlayer(name)
-        if #achs == 0 then
-            print("GroupRecorder: no recorded achievements for " .. name)
-        else
-            EnsureLines(#achs)
-            ClearContent()
-            for i,v in ipairs(achs) do
-                local timeStr = date("%Y-%m-%d %H:%M:%S", v.timestamp or 0)
-                local achName = v.achievement.name or ("Achievement "..tostring(v.achievement.id or ""))
-                lines[i]:SetText(("%s — %s — %s"):format(timeStr, achName, tostring(v.boss)))
-            end
-            InspectFrame:Show()
-        end
+    local nameFull = inspectedUnit and UnitName(inspectedUnit) or other_name or UnitName("target")
+    local guid = inspectedUnit and UnitGUID(inspectedUnit)
+
+    -- populate
+    local results = {}
+    if guid then results = GetAchievementsForPlayer(guid) end
+    if #results == 0 and nameFull then results = GetAchievementsForPlayer(nameFull) end
+    if #results == 0 and nameFull then
+        local plain = nameFull:match("^(.-)%-.+$") or nameFull
+        results = GetAchievementsForPlayer(plain)
     end
+    PopulateForList(results, nameFull)
+
+    IPanel:Show()
+    I_f:Show()
+    content:Show()
 end
 
--- Auto-show when inspecting (if you use the Inspect action). Hook INSPECT_READY to try to resolve GUID/name.
-InspectFrame:RegisterEvent("INSPECT_READY")
-InspectFrame:SetScript("OnEvent", function(self, event, ...)
-    if event == "INSPECT_READY" then
-        local unit = "mouseover" -- INSPECT_READY doesn't give unit; we rely on target/mouseover or keep manual slash
-        -- best-effort: use target if inspecting target
-        if UnitExists("target") and UnitIsPlayer("target") then
-            ShowInspectAchievements("target")
-        end
-    end
-end)
+function HideInspectGR()
+    IPanel:Hide()
+    I_f:Hide()
+    content:Hide()
+    ClearContent()
+end
+
 
 -- Close on Escape
-tinsert(UISpecialFrames, InspectFrame:GetName())
+function Inspect:Startup()
+	-- the entry point of our addon
+	-- called inside loading screen before player sees world, some api functions are not available yet.
+	-- event handling helper
+	self:SetScript("OnEvent", function(self, event, ...)
+		self[event](self, ...)
+	end)
+    
+    self:RegisterEvent("PLAYER_LOGIN")
+	-- actually start loading the addon once player ui is loading
+	self:RegisterEvent("INSPECT_READY")
+end
+
+function Inspect:PLAYER_LOGIN()
+	self:RegisterEvent("INSPECT_READY")
+end
+
+function Inspect:INSPECT_READY(...) 
+    if InspectFrame == nil then
+        print("InspectFrame is null")
+        return
+    end
+    print("Continued")
+    if loaded_inspect_frame == false then
+        print("loaded_inspect_frame is false")
+        loaded_inspect_frame = true
+        local ITabName = "Achievements"
+        local ITabID = InspectFrame.numTabs + 1
+        local ITab =
+            CreateFrame("Button", "$parentTab" .. ITabID, InspectFrame, "CharacterFrameTabButtonTemplate", ITabName)
+        PanelTemplates_SetNumTabs(InspectFrame, ITabID)
+        PanelTemplates_SetTab(InspectFrame, 1)
+
+        ITab:SetPoint("LEFT", "$parentTab" .. (ITabID - 1), "RIGHT", -16, 0)
+        ITab:SetText(ITabName)
+    end
+    if _G["InspectHonorFrame"] ~= nil then
+		hooksecurefunc(_G["InspectHonorFrame"], "Show", function(self)
+			HideInspectGR()
+		end)
+	end
+
+	if _G["InspectPaperDollFrame"] ~= nil then
+		hooksecurefunc(_G["InspectPaperDollFrame"], "Show", function(self)
+			HideInspectGR()
+		end)
+	end
+
+	if _G["InspectPVPFrame"] ~= nil then
+		hooksecurefunc(_G["InspectPVPFrame"], "Show", function(self)
+			HideInspectGR()
+		end)
+	end
+
+	if _G["InspectTalentFrame"] ~= nil then
+		hooksecurefunc(_G["InspectTalentFrame"], "Show", function(self)
+			HideInspectGR()
+		end)
+	end
+
+    hooksecurefunc("CharacterFrameTab_OnClick", function(self)
+		local name = self:GetName()
+		if
+			(name ~= "InspectFrameTab3" and _G["MisguidedLogsBuildLabel"] ~= "WotLK")
+			or (name ~= "InspectFrameTab4" and _G["MisguidedLogsBuildLabel"] == "WotLK")
+		then -- 3:era, 4:wotlk
+			return
+		end
+		if _G["MisguidedLogsBuildLabel"] == "WotLK" then
+			PanelTemplates_SetTab(InspectFrame, 4)
+		else
+			PanelTemplates_SetTab(InspectFrame, 3)
+		end
+		if _G["InspectPaperDollFrame"] ~= nil then
+			_G["InspectPaperDollFrame"]:Hide()
+		end
+		if _G["InspectHonorFrame"] ~= nil then
+			_G["InspectHonorFrame"]:Hide()
+		end
+		if _G["InspectPVPFrame"] ~= nil then
+			_G["InspectPVPFrame"]:Hide()
+		end
+		if _G["InspectTalentFrame"] ~= nil then
+			_G["InspectTalentFrame"]:Hide()
+		end
+
+		target_name = UnitName("target")			
+		ShowInspectGR(nil)
+	end)
+
+	hooksecurefunc(InspectFrame, "Hide", function(self, button)
+		HideInspectGR()
+	end)
+end
+
+Inspect:Startup()
