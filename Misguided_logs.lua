@@ -9,7 +9,7 @@ frame:RegisterEvent("ENCOUNTER_END")
 -- Config: hybrid threshold (players with healing ratio between LOW and HIGH are hybrids)
 local HYBRID_LOW = 0.45
 local HYBRID_HIGH = 0.55
-local encounterStarted = false;
+local encounterStarted = false
 
 -- DB init
 local function InitDB()
@@ -125,6 +125,7 @@ local function StartPull(bossName)
     
         return nil
     end
+    
     
     -- INSPECT_TALENT_READY handler (update stored player entry when inspect completes)
     local inspectQueue = {} -- maps guid -> unit token
@@ -254,6 +255,11 @@ local function EnsurePlayerEntry(name, guid)
     return p
 end
 
+local function DiscardPull()
+    currentPull = nil
+    encounterStarted = false
+    print("GroupRecorder: pull discarded (wipe/reset)")
+end
 -- Combat log parsing
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -264,8 +270,19 @@ frame:SetScript("OnEvent", function(self, event, ...)
         StartPull(encounterName)
     elseif event == "ENCOUNTER_END" then
         print("EncounterEnded")
+        local encounterID, encounterName, difficultyID, groupSize, success = ...
+        print("success: ".. success)
+        if success == 0 then
+            DiscardPull()
+            return
+        end
         encounterStarted = false;
-        EndPull()
+        EndPull()    
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- entered combat (fallback/start)
+        C_Timer.After(2, function()
+            DiscardPull()
+        end)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         if encounterStarted == false then 
             return
