@@ -57,6 +57,7 @@ end
 local function ExportToJSON(data, filename)
     if not data then print("GroupRecorder: no data to export") return end
     filename = filename or ("GroupRecorder_" .. date("%Y%m%d_%H%M%S") .. ".json")
+    print(filename)
     local ok, content = pcall(function()
         local sanitized = sanitize(data)
         return encodeValue(sanitized)
@@ -65,11 +66,12 @@ local function ExportToJSON(data, filename)
         print("GroupRecorder: failed to encode JSON")
         return
     end
-    local success = pcall(function() WriteFile(filename, content) end)
+    print(content)
+    local success, err = pcall(function() WriteFile(filename, content) end)
     if success then
         print(("GroupRecorder: exported to %s"):format(filename))
     else
-        print("GroupRecorder: failed to write file (WriteFile unavailable or error)")
+        print("GroupRecorder: failed to write file (WriteFile unavailable or error)" .. tostring(err))
     end
 end
 

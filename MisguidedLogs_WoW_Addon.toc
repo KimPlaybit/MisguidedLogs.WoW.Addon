@@ -4,9 +4,11 @@
 ## Notes: This addon is to track and log runs for getting achievements on the page Misguidedlogs.com
 ## Author: Zeeshan
 ## SavedVariables: GroupRecorderDB
+## RequiredLibraries: AceAddon-3.0 AceComm-3.0 AceSerializer-3.0 LibCompress
 
 Misguided_logs.lua
 Export.lua
+AchievementArray.lua
 Achievement.lua
 AchievementPopup.lua
 Inspect.lua

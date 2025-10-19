@@ -9,10 +9,10 @@ frame:RegisterEvent("ENCOUNTER_END")
 -- Config: hybrid threshold (players with healing ratio between LOW and HIGH are hybrids)
 local HYBRID_LOW = 0.45
 local HYBRID_HIGH = 0.55
+local encounterStarted = false;
 
 -- DB init
 local function InitDB()
-    GroupRecorderDB = {}
     if not GroupRecorderDB then GroupRecorderDB = {} end
     if not GroupRecorderDB.groups then GroupRecorderDB.groups = {} end
     if not GroupRecorderDB.pulls then GroupRecorderDB.pulls = {} end
@@ -64,7 +64,16 @@ end
 -- Pull tracking state
 currentPull = nil
 local function StartPull(bossName)
+    if not (bossName and ACHIEVEMENTS_BY_BOSS[bossName]) then
+        print("encounter not started")
+        return
+    end
+
+    print("encounter started")
+    RecordGroup()
+    encounterStarted = true;
     local ts = time()
+
     currentPull = {
         start = ts,
         boss = bossName or "unknown",
@@ -72,8 +81,102 @@ local function StartPull(bossName)
         damageDone = {},
         healingDone = {},
         damageTaken = {},
+        swingTaken = {},
+        swingDamageTaken = {}
     }
 
+
+    local function GetClassicPlayerTalents(unit)
+        if not UnitExists(unit) then return nil end
+        local guid = UnitGUID(unit)
+        local talents = {}
+    
+        -- If unit is player and it's you, read talent selections directly
+        if UnitIsUnit(unit, "player") then
+            for tab = 1, GetNumTalentTabs() do
+                local numTalents = GetNumTalents(tab)
+                for index = 1, numTalents do
+                    local name, icon, tier, column, isSelected = GetTalentInfo(tab, index)
+                    if isSelected then
+                        talents[#talents+1] = {tab = tab, index = index, name = name}
+                    end
+                end
+            end
+            return talents
+        end
+    
+        -- Try inspect for other players (may fail). Use UnitGUID to pass to GetTalentInfo inspect path.
+        -- This requires the target to be inspectable and the inspect API to be allowed.
+        if CanInspect(unit) and (not UnitIsDeadOrGhost(unit)) then
+            NotifyInspect(unit) -- request inspect data; results come via INSPECT_TALENT_READY in some clients
+            -- Immediate read may still work if server provides it; attempt to read using GUID-aware GetTalentInfo:
+            for tab = 1, GetNumTalentTabs() do
+                local numTalents = GetNumTalents(tab)
+                for index = 1, numTalents do
+                    local name, icon, tier, column, isSelected = GetTalentInfo(tab, index, 1, true, guid)
+                    if isSelected then
+                        talents[#talents+1] = {tab = tab, index = index, name = name}
+                    end
+                end
+            end
+            -- You may not get full data immediately; leave talents (possibly empty) — handle INSPECT_TALENT_READY to update later.
+            return talents
+        end
+    
+        return nil
+    end
+    
+    -- INSPECT_TALENT_READY handler (update stored player entry when inspect completes)
+    local inspectQueue = {} -- maps guid -> unit token
+    local function OnInspectTalentReady(event, inspectedGUID)
+        for guid, unit in pairs(inspectQueue) do
+            if guid == inspectedGUID then
+                local talents = {}
+                for tab = 1, GetNumTalentTabs() do
+                    local numTalents = GetNumTalents(tab)
+                    for index = 1, numTalents do
+                        local name, icon, tier, column, isSelected = GetTalentInfo(tab, index, 1, true, inspectedGUID)
+                        if isSelected then talents[#talents+1] = {tab=tab,index=index,name=name} end
+                    end
+                end
+                -- find player entry by guid and update
+                for k,pl in pairs(currentPull.players) do
+                    if pl.guid == inspectedGUID then
+                        pl.talents = talents
+                        break
+                    end
+                end
+                inspectQueue[guid] = nil
+                break
+            end
+        end
+    end
+
+    -- INSPECT_TALENT_READY handler (update stored player entry when inspect completes)
+    local inspectQueue = {} -- maps guid -> unit token
+    local function OnInspectTalentReady(event, inspectedGUID)
+        for guid, unit in pairs(inspectQueue) do
+            if guid == inspectedGUID then
+                local talents = {}
+                for tab = 1, GetNumTalentTabs() do
+                    local numTalents = GetNumTalents(tab)
+                    for index = 1, numTalents do
+                        local name, icon, tier, column, isSelected = GetTalentInfo(tab, index, 1, true, inspectedGUID)
+                        if isSelected then talents[#talents+1] = {tab=tab,index=index,name=name} end
+                    end
+                end
+                -- find player entry by guid and update
+                for k,pl in pairs(currentPull.players) do
+                    if pl.guid == inspectedGUID then
+                        pl.talents = talents
+                        break
+                    end
+                end
+                inspectQueue[guid] = nil
+                break
+            end
+        end
+    end
     -- include all group members and the player
     local function AddUnit(unit)
         if not UnitExists(unit) or not UnitIsPlayer(unit) then return end
@@ -87,7 +190,7 @@ local function StartPull(bossName)
         local class, classFile = UnitClass(unit)
         -- avoid duplicate entries by full name (realm-qualified) or short name
         if not currentPull.players[fullName] then
-            currentPull.players[fullName] = {
+            local entry = {
                 guid = guid,
                 name = fullName,
                 realm = realm,
@@ -95,7 +198,23 @@ local function StartPull(bossName)
                 damage = 0,
                 healing = 0,
                 damageTaken = 0,
+                swingDamageTaken = 0,
+                swingTaken = 0,
+                talents = nil
             }
+            -- immediate talent read/queue
+            local t = GetClassicPlayerTalents(unit)
+            if t and #t > 0 then
+                entry.talents = t
+            else
+                -- queue inspect for others
+                if not UnitIsUnit(unit, "player") and CanInspect(unit) then
+                    NotifyInspect(unit)
+                    inspectQueue[guid] = unit
+                end
+            end
+    
+            currentPull.players[fullName] = entry
         end
     end
 
@@ -140,16 +259,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
         print("Loading DB and group")
         InitDB()
-        RecordGroup()
-    elseif event == "GROUP_ROSTER_UPDATE" then
-        RecordGroup()
     elseif event == "ENCOUNTER_START" then
         local encounterID, encounterName = ...
         StartPull(encounterName)
     elseif event == "ENCOUNTER_END" then
         print("EncounterEnded")
+        encounterStarted = false;
         EndPull()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        if encounterStarted == false then 
+            return
+        end
+
         local timestamp, subevent, hideCaster,
               srcGUID, srcName, srcFlags, srcRaidFlags,
               dstGUID, dstName, dstFlags, dstRaidFlags,
@@ -187,16 +308,23 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     if p then p.damage = p.damage + dmg end
                     currentPull.damageDone[srcName] = (currentPull.damageDone[srcName] or 0) + dmg
                     print("Damage Done" .. tostring(currentPull.damageDone[srcName]).. ", " .. p.guid)
-                    print("Current Damage Done by attack: " .. dmg.. ", " .. p.guid)
-                    EndPull()
                 end
                 -- track damageTaken for targets (who the boss is hitting)
                 if dstName and dstGUID and dstGUID:sub(1,6) == "Player" then
                     local p = EnsurePlayerEntry(dstName, dstGUID)
-                    if p then p.damageTaken = p.damageTaken + dmg end
+                    if p then 
+                        p.damageTaken = p.damageTaken + dmg 
+                        if subevent == "SWING_DAMAGE" then
+                            p.swingTaken =  p.swingTaken+ 1
+                            p.swingDamageTaken =  p.swingDamageTaken + dmg
+                        end
+                    end
                     currentPull.damageTaken[dstName] = (currentPull.damageTaken[dstName] or 0) + dmg
                     print("Damage Taken" .. tostring(currentPull.damageTaken[dstName]) .. ", " .. p.guid)
-                    print("sourceGuid" .. srcGUID)
+                    if subevent == "SWING_DAMAGE" then
+                        currentPull.swingTaken[dstName] =  (currentPull.swingTaken[dstName] or 0) + 1
+                        currentPull.swingDamageTaken[dstName] =  (currentPull.swingDamageTaken[dstName] or 0) + dmg
+                    end
                 end
             end
 
@@ -207,7 +335,6 @@ frame:SetScript("OnEvent", function(self, event, ...)
                     local p = EnsurePlayerEntry(srcName, srcGUID)
                     if p then p.healing = p.healing + heal end
                     currentPull.healingDone[srcName] = (currentPull.healingDone[srcName] or 0) + heal
-                    print("Heal Done" .. tostring(currentPull.healingDone[srcName]) .. ", " .. p.guid)
                 end
             end
         end

@@ -1,10 +1,5 @@
 -- Achievement map: map encounter name (or encounterID string) -> achievement key/info
 -- Update this table to add new boss -> achievement mappings.
-local ACHIEVEMENTS_BY_BOSS = {
-    ["Onyxia"] = { id = 90001, name = "Onyxia: Single-Class Clear" },
-    ["Lucifron"] = { id = 90002, name = "Lucifron: Single-Class Clear" },
-    ["Targorr the Dread"] = { id = 1696, name = "Targorr the Dread: Single-Class Clear" },
-}
 
 -- Helper: get class from a player name entry in pull.players if available via GUID lookup
 local function GetClassFromPlayerEntry(p)
@@ -107,7 +102,7 @@ function EndPull()
                 class = cls,
                 timestamp = time(),
             }
-            
+
             NotifyAchievement({
                 id = achInfo.id,
                 name = achInfo.name or ("Single-class clear: "..tostring(cls)),
