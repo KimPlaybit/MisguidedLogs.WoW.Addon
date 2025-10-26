@@ -77,6 +77,38 @@ local function CheckSingleClassAchievement(pull)
     return false, nil
 end
 
+TAUNTING_TANKS = {"WARRIOR", "DRUID"}
+META_DPS_CLASS = { "MAGE", "WARRIOR"}
+
+local function toSet(list)
+    local s = {}
+    if type(list) == "table" then
+        for _, v in ipairs(list) do
+            if type(v) == "string" then s[v:upper()] = true end
+        end
+    end
+    return s
+end
+
+local function checkIfClassNotIncluded(pull, classesToNotInclude)
+    if not pull or not pull.players then return false end
+    local excludeSet = toSet(classesToNotInclude)
+    local contribCount = 0
+
+    for name, p in pairs(pull.players) do
+        local contrib = (p.damage or 0) + (p.healing or 0)
+        if contrib > 0 then
+            contribCount = contribCount + 1
+            local class = (GetClassFromPlayerEntry(p) or "UNKNOWN"):upper()
+            if excludeSet[class] then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
 -- Hook into ENCOUNTER_END handling: after EndPull(), evaluate achievements for the ended pull
 -- Replace or augment your existing EndPull() with this behavior (keeps existing functionality).
 local oldEndPull = EndPull
@@ -113,6 +145,52 @@ function EndPull()
         end
     end
 
+    if not encounterHasTargetAddons then
+        pullCopy.achievements = pullCopy.achievements or {}
+        pullCopy.achievements[bossKey] = {
+            id = 92000,
+            name = "Freeriding - no addons: "..tostring(bossKey),
+            class = "any",
+            timestamp = time(),
+        }
+
+        NotifyAchievement({
+            id = 92000,
+            name = achInfo.name or ("Freeriding - no addons: "..tostring(bossKey)),
+            class = "any"
+        })
+    end
+
+    if checkIfClassNotIncluded(pullCopy, TAUNTING_TANKS) == true then
+        pullCopy.achievements[bossKey] = {
+            id = 92000,
+            name = "No Taunting Tanks: "..tostring(bossKey),
+            class = "any",
+            timestamp = time(),
+        }
+
+        NotifyAchievement({
+            id = 92000,
+            name = achInfo.name or ("No Taunting Tanks: "..tostring(bossKey)),
+            class = "any"
+        })
+    end
+
+    if checkIfClassNotIncluded(pullCopy, META_DPS_CLASS) == true then
+        pullCopy.achievements[bossKey] = {
+            id = 92000,
+            name = "Anti-meta setup: "..tostring(bossKey),
+            class = "any",
+            timestamp = time(),
+        }
+
+        NotifyAchievement({
+            id = 92000,
+            name = achInfo.name or ("Anti-meta setup: "..tostring(bossKey)),
+            class = "any"
+        })
+    end
+    
     -- store final pull and clear currentPull
     GroupRecorderDB.pulls[tostring(pullCopy.start or time())] = pullCopy
     currentPull = nil

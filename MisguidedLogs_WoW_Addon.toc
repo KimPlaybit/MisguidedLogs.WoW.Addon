@@ -6,6 +6,7 @@
 ## SavedVariables: GroupRecorderDB
 ## RequiredLibraries: AceAddon-3.0 AceComm-3.0 AceSerializer-3.0 LibCompress
 
+AddonCheck.lua
 Misguided_logs.lua
 Export.lua
 AchievementArray.lua

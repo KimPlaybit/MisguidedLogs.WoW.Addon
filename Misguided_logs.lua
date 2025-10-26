@@ -235,6 +235,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         InitDB()
     elseif event == "ENCOUNTER_START" then
         local encounterID, encounterName = ...
+        StartProbe()
         StartPull(encounterName)
     elseif event == "ENCOUNTER_END" then
         print("EncounterEnded")
@@ -245,11 +246,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
             return
         end
         encounterStarted = false;
+        StartProbe()
         EndPull()    
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- entered combat (fallback/start)
         C_Timer.After(2, function()
-            DiscardPull()
+            DiscardPull() 
         end)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         if encounterStarted == false then 
@@ -398,6 +400,13 @@ function GroupRecorder.AnalyzePull(pull)
         hybrids = hybrids,
         raw = pull
     }
+end
+
+-- Slash command: summary of last pull (includes GUIDs where available)
+SLASH_CLEARREC= "/clearrec"
+SlashCmdList["CLEARREC"] = function(msg)
+    GroupRecorderDB.pulls = {}
+    print("cleared all Pulls")
 end
 
 -- Slash command: summary of last pull (includes GUIDs where available)
