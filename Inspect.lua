@@ -1,11 +1,21 @@
 -- InspectAchievements.lua
--- Shows recorded achievements for inspected unit/player
+-- Shows recorded achievements for inspected unit/player and requests inspected player's achievements
 
 local Inspect = CreateFrame("Frame", "Inspect", nil, "BackdropTemplate")
 local loaded_inspect_frame = false;
 
 local LINE_HEIGHT = 18
 local TAB_TITLE = "MisguidedLogs Achievements"
+
+-- Addon message prefix/protocol
+local ADDON_PREFIX = "GR_ACH" -- registered on login
+local CHUNK_SIZE = 180 -- safe chunk size for SendAddonMessage payload (conservative)
+local REQUEST_TAG = "REQ"
+local RESPONSE_TAG = "RESP"
+local CHUNK_TAG = "CHNK" -- used for multi-chunk responses
+
+-- Reassembly table for incoming chunks
+local incomingBuffers = {}
 
 -- Create persistent frames (parent will be set to InspectFrame when shown)
 local IPanel = CreateFrame("Frame", nil, UIParent)
@@ -105,6 +115,123 @@ local function PopulateForList(list, displayName)
     end
 end
 
+-- Serialization helpers (very simple, uses ; to separate entries and , for fields)
+local function serializeResults(results)
+    -- each entry: ts,id,name,boss
+    local parts = {}
+    for _,v in ipairs(results) do
+        local ts = tostring(v.timestamp or 0)
+        local id = tostring(v.achievement.id or "")
+        local name = (v.achievement.name or ""):gsub("%|", ""):gsub(";", ",")
+        local boss = tostring(v.boss or ""):gsub("%|", ""):gsub(";", ",")
+        parts[#parts+1] = table.concat({ts, id, name, boss}, "|")
+    end
+    return table.concat(parts, ";")
+end
+
+local function deserializeResults(s)
+    if not s or s == "" then return {} end
+    local out = {}
+    for entry in s:gmatch("[^;]+") do
+        local ts, id, name, boss = entry:match("^([^|]+)|([^|]*)|([^|]*)|([^|]*)$")
+        out[#out+1] = {
+            timestamp = tonumber(ts) or 0,
+            boss = boss,
+            achievement = { id = tonumber(id) or nil, name = name }
+        }
+    end
+    return out
+end
+
+-- Send addon message utilities (handles chunking)
+local function SendAddonMessageChunks(prefix, payload, channel, target)
+    if #payload <= CHUNK_SIZE then
+        C_ChatInfo.SendAddonMessage(prefix, payload, channel, target)
+        return
+    end
+    -- split
+    local total = math.ceil(#payload / CHUNK_SIZE)
+    for i = 1, total do
+        local start = (i-1)*CHUNK_SIZE + 1
+        local chunk = payload:sub(start, start + CHUNK_SIZE - 1)
+        local header = table.concat({CHUNK_TAG, tostring(i), tostring(total)}, "|")
+        local msg = header .. "|" .. chunk
+        C_ChatInfo.SendAddonMessage(prefix, msg, channel, target)
+    end
+end
+
+-- Request/response logic
+local function SendRequestToPlayer(targetName, identifier)
+    if not targetName or targetName == "" then return end
+    local payload = table.concat({REQUEST_TAG, identifier}, "|")
+    -- prefer WHISPER directly to target (inspected player)
+    pcall(function()
+        SendAddonMessageChunks(ADDON_PREFIX, payload, "WHISPER", targetName)
+    end)
+end
+
+local function SendResponseToRequester(prefix, channel, requester, payload)
+    -- payload should be small-chunked by SendAddonMessageChunks
+    SendAddonMessageChunks(prefix, table.concat({RESPONSE_TAG, payload}, "|"), channel, requester)
+end
+
+-- Incoming message handler
+local function OnAddonMessage(prefix, message, channel, sender)
+    if prefix ~= ADDON_PREFIX then return end
+    if not message then return end
+
+    local tag, rest = message:match("^([^|]+)|?(.*)$")
+    if not tag then return end
+
+    if tag == REQUEST_TAG then
+        -- sender requests achievements for identifier rest
+        local identifier = rest or ""
+        -- get local results from DB
+        local results = GetAchievementsForPlayer(identifier)
+        local serialized = serializeResults(results)
+        -- send response back to sender (use WHISPER)
+        SendResponseToRequester(ADDON_PREFIX, "WHISPER", sender, serialized)
+        return
+    end
+
+    if tag == RESPONSE_TAG then
+        -- entire payload single-chunk response
+        local payload = rest or ""
+        local results = deserializeResults(payload)
+        -- display results using sender as displayName
+        PopulateForList(results, sender)
+        return
+    end
+
+    if tag == CHUNK_TAG then
+        -- chunked incoming: format "CHNK|index|total|<chunkdata>"
+        local idx, total, chunk = rest:match("^(%d+)|(%d+)|(.+)$")
+        idx = tonumber(idx); total = tonumber(total)
+        if not idx or not total or not chunk then return end
+        -- key by sender
+        local buf = incomingBuffers[sender] or { total = total, parts = {} }
+        buf.total = total
+        buf.parts[idx] = chunk
+        incomingBuffers[sender] = buf
+        -- check if complete
+        local complete = true
+        for i=1,buf.total do
+            if not buf.parts[i] then complete = false; break end
+        end
+        if complete then
+            local full = table.concat(buf.parts)
+            incomingBuffers[sender] = nil
+            -- full may start with RESP| or similar (if we chunked a RESP payload)
+            local subt, subrest = full:match("^([^|]+)|?(.*)$")
+            if subt == RESPONSE_TAG then
+                local results = deserializeResults(subrest or "")
+                PopulateForList(results, sender)
+            end
+        end
+        return
+    end
+end
+
 -- Show/hide functions modeled after example
 function ShowInspectGR(_dummy, other_name)
     if not InspectFrame then return end
@@ -125,10 +252,10 @@ function ShowInspectGR(_dummy, other_name)
     if not inspectedUnit or not UnitExists(inspectedUnit) then
         if UnitExists("target") and UnitIsPlayer("target") then inspectedUnit = "target" end
     end
-    local nameFull = inspectedUnit and UnitName(inspectedUnit) or other_name or UnitName("target")
+    local nameFull = inspectedUnit and UnitName(inspectedUnit) or other_name or (UnitExists("target") and UnitName("target")) or other_name
     local guid = inspectedUnit and UnitGUID(inspectedUnit)
 
-    -- populate
+    -- populate from local DB first
     local results = {}
     if guid then results = GetAchievementsForPlayer(guid) end
     if #results == 0 and nameFull then results = GetAchievementsForPlayer(nameFull) end
@@ -137,6 +264,12 @@ function ShowInspectGR(_dummy, other_name)
         results = GetAchievementsForPlayer(plain)
     end
     PopulateForList(results, nameFull)
+
+    -- send a request to the inspected player to return their achievements (if not enough local data)
+    if nameFull and (not guid or #results == 0) then
+        -- send request using target's name (include realm if returned by UnitName)
+        SendRequestToPlayer(nameFull, guid or nameFull)
+    end
 
     IPanel:Show()
     I_f:Show()
@@ -154,29 +287,27 @@ end
 -- Close on Escape
 function Inspect:Startup()
 	-- the entry point of our addon
-	-- called inside loading screen before player sees world, some api functions are not available yet.
-	-- event handling helper
 	self:SetScript("OnEvent", function(self, event, ...)
 		self[event](self, ...)
 	end)
     
     self:RegisterEvent("PLAYER_LOGIN")
-	-- actually start loading the addon once player ui is loading
 	self:RegisterEvent("INSPECT_READY")
 end
 
 function Inspect:PLAYER_LOGIN()
+	-- register addon prefix for messages
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        C_ChatInfo.RegisterAddonMessagePrefix(ADDON_PREFIX)
+    end
 	self:RegisterEvent("INSPECT_READY")
 end
 
 function Inspect:INSPECT_READY(...) 
     if InspectFrame == nil then
-        print("InspectFrame is null")
         return
     end
-    print("Continued")
     if loaded_inspect_frame == false then
-        print("loaded_inspect_frame is false")
         loaded_inspect_frame = true
         local ITabName = "Achievements"
         local ITabID = InspectFrame.numTabs + 1
@@ -245,6 +376,13 @@ function Inspect:INSPECT_READY(...)
 	hooksecurefunc(InspectFrame, "Hide", function(self, button)
 		HideInspectGR()
 	end)
+
+    -- listen for addon messages
+    local eventFrame = CreateFrame("Frame")
+    eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+    eventFrame:SetScript("OnEvent", function(_, _, prefix, message, channel, sender, ...)
+        OnAddonMessage(prefix, message, channel, sender)
+    end)
 end
 
 Inspect:Startup()

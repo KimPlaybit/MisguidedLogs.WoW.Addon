@@ -31,10 +31,8 @@ frame:SetScript("OnEvent", function(self, event, inspectedUnitGUID)
       for t = 1, GetNumTalentTabs(true) do
         talent = {}
         local id,name,desc,icon,points = GetTalentTabInfo(t, true)
-        print("Tab", t, name, "points:", points)    
         for k = 1, GetNumTalents(t) do
           local tname, ticon, tier, col, rank, max = GetTalentInfo(t, k, true)
-          print(" ", tname, rank, "/", max)
         end
       end
       f:UnregisterEvent("INSPECT_READY")
@@ -65,7 +63,6 @@ local function RecordGroup(timestamp)
             end
         end
     else
-        print("testing Group")
         -- player
         local pname = UnitName("player")
         local pguid = UnitGUID("player")
@@ -81,12 +78,11 @@ local function RecordGroup(timestamp)
     end
     GroupRecorderDB.groups[tostring(timestamp)] = members
     
-    print(members)
     return members
 end
 
 local function GetClassicPlayerTalents(unit)
-    if not UnitExists(unit) then return nil end
+    if not UnitExists(unit) and not isPet then return nil end
     local guid = UnitGUID(unit)
     local talents = {}
 
@@ -206,7 +202,6 @@ local function StartPull(bossName)
     -- ensure player present if not already
     AddUnit("player")
 
-    print(currentPull.boss)
     GroupRecorderDB.pulls[tostring(ts)] = currentPull
 end
 
@@ -226,21 +221,17 @@ end
 local function DiscardPull()
     currentPull = nil
     encounterStarted = false
-    print("GroupRecorder: pull discarded (wipe/reset)")
 end
 -- Combat log parsing
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
-        print("Loading DB and group")
         InitDB()
     elseif event == "ENCOUNTER_START" then
         local encounterID, encounterName = ...
         StartProbe()
         StartPull(encounterName)
     elseif event == "ENCOUNTER_END" then
-        print("EncounterEnded")
         local encounterID, encounterName, difficultyID, groupSize, success = ...
-        print("success: ".. success)
         if success == 0 then
             DiscardPull()
             return
@@ -292,22 +283,20 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 if srcName and srcGUID and srcGUID:sub(1,6) == "Player" then
                     -- use srcName as key, store GUID
                     local p = EnsurePlayerEntry(srcName, srcGUID)
-                    if p then p.damage = p.damage + dmg end
+                    if p then p.damage = (p.damage or 0) + dmg end
                     currentPull.damageDone[srcName] = (currentPull.damageDone[srcName] or 0) + dmg
-                    print("Damage Done" .. tostring(currentPull.damageDone[srcName]).. ", " .. p.guid)
                 end
                 -- track damageTaken for targets (who the boss is hitting)
                 if dstName and dstGUID and dstGUID:sub(1,6) == "Player" then
                     local p = EnsurePlayerEntry(dstName, dstGUID)
                     if p then 
-                        p.damageTaken = p.damageTaken + dmg 
+                        p.damageTaken = (p.damageTaken or 0) + dmg 
                         if subevent == "SWING_DAMAGE" then
-                            p.swingTaken =  p.swingTaken + 1
-                            p.swingDamageTaken =  p.swingDamageTaken + dmg
+                            p.swingTaken =  (p.swingTaken or 0) + 1
+                            p.swingDamageTaken =  (p.swingDamageTaken or 0) + dmg
                         end
                     end
                     currentPull.damageTaken[dstName] = (currentPull.damageTaken[dstName] or 0) + dmg
-                    print("Damage Taken" .. tostring(currentPull.damageTaken[dstName]) .. ", " .. p.guid)
                     if subevent == "SWING_DAMAGE" then
                         currentPull.swingTaken[dstName] =  (currentPull.swingTaken[dstName] or 0) + 1
                         currentPull.swingDamageTaken[dstName] =  (currentPull.swingDamageTaken[dstName] or 0) + dmg
@@ -320,7 +309,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 local heal = tonumber(amount) or 0
                 if srcName and srcGUID and srcGUID:sub(1,6) == "Player" then
                     local p = EnsurePlayerEntry(srcName, srcGUID)
-                    if p then p.healing = p.healing + heal end
+                    if p then p.healing = (p.healing or 0) + heal end
                     currentPull.healingDone[srcName] = (currentPull.healingDone[srcName] or 0) + heal
                 end
             end

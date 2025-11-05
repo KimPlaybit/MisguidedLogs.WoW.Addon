@@ -6,7 +6,6 @@ local function GetClassFromPlayerEntry(p)
     if not p then return nil end
     -- try to use stored guid to derive class token (GUID contains unit type and hex id; not class)
     -- fallback: try UnitClass for online members (may fail for logged out players)
-    print(p.guid)
     if p.guid then
         -- No reliable class from GUID in Classic; attempt UnitName -> class via unit token search
         -- Try searching raid/party/player units for matching GUID
@@ -156,12 +155,13 @@ function EndPull()
 
         NotifyAchievement({
             id = 92000,
-            name = achInfo.name or ("Freeriding - no addons: "..tostring(bossKey)),
+            name = "Freeriding - no addons: "..tostring(bossKey),
             class = "any"
         })
     end
 
     if checkIfClassNotIncluded(pullCopy, TAUNTING_TANKS) == true then
+        pullCopy.achievements = pullCopy.achievements or {}
         pullCopy.achievements[bossKey] = {
             id = 92000,
             name = "No Taunting Tanks: "..tostring(bossKey),
@@ -171,12 +171,13 @@ function EndPull()
 
         NotifyAchievement({
             id = 92000,
-            name = achInfo.name or ("No Taunting Tanks: "..tostring(bossKey)),
+            name = "No Taunting Tanks: "..tostring(bossKey),
             class = "any"
         })
     end
 
     if checkIfClassNotIncluded(pullCopy, META_DPS_CLASS) == true then
+        pullCopy.achievements = pullCopy.achievements or {}
         pullCopy.achievements[bossKey] = {
             id = 92000,
             name = "Anti-meta setup: "..tostring(bossKey),
@@ -186,7 +187,7 @@ function EndPull()
 
         NotifyAchievement({
             id = 92000,
-            name = achInfo.name or ("Anti-meta setup: "..tostring(bossKey)),
+            name = "Anti-meta setup: "..tostring(bossKey),
             class = "any"
         })
     end

@@ -59,7 +59,6 @@ end
 local function summarizeAndSetFlag()
     local any = false
     for pname, tbl in pairs(results) do
-        print(pname)
         if matches_target_substr(tostring(tbl)) then 
             any = true 
         end
@@ -140,8 +139,6 @@ function StartProbe()
 
     -- broadcast probe
     Send(PREFIX, "PROBE|" .. me, channel)
-
-    print("sent probe")
     -- immediately record initiator's local missing list so initiator is checked without waiting
     local myMissing = CheckLocalTargets()
     results[me] = myMissing
